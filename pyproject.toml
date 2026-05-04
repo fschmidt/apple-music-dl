@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "apple-music-dl"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "gamdl>=3.5",
+    "pywebview>=5.0",
+    "keyring>=25.0",
+    "mutagen>=1.47",
+]
+
+[project.scripts]
+apple-music-dl = "apple_music_dl.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["apple_music_dl*"]
+
+[tool.setuptools.package-data]
+apple_music_dl = ["ui/*.html", "ui/*.js", "ui/*.css"]
