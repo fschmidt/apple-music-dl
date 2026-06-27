@@ -31,12 +31,99 @@ class TrackResult:
     skipped: bool = False
 
 
+@dataclass
+class SearchResult:
+    id: str
+    kind: str  # "song" | "album"
+    title: str
+    artist: str
+    url: str
+    artwork_url: str | None = None
+    subtitle: str = ""  # album name (songs) or track count / year (albums)
+
+
+# The dev token (a JWT scraped from Apple Music's web bundle) is expensive to
+# fetch — it requires downloading a ~3 MB JS file. It changes rarely, so cache
+# it across calls. It's just a string, so it's safe to reuse across the fresh
+# event loops that asyncio.run() creates for each sync call below.
+_cached_token: str | None = None
+
+
+async def _create_api(media_user_token: str) -> AppleMusicApi:
+    global _cached_token
+    try:
+        api = await AppleMusicApi.create(
+            media_user_token=media_user_token,
+            token=_cached_token,
+        )
+    except Exception:
+        # Cached token may be stale/invalid — refresh once from scratch.
+        _cached_token = None
+        api = await AppleMusicApi.create(media_user_token=media_user_token)
+    _cached_token = api.token
+    return api
+
+
+def _normalize_search(raw: dict) -> list[SearchResult]:
+    results = raw.get("results", {}) or {}
+    out: list[SearchResult] = []
+    for kind, data_key in (("song", "songs"), ("album", "albums")):
+        section = results.get(data_key, {}) or {}
+        for item in section.get("data", []) or []:
+            attrs = item.get("attributes", {}) or {}
+            art = attrs.get("artwork", {}) or {}
+            artwork_url = None
+            if art.get("url"):
+                artwork_url = (
+                    art["url"].replace("{w}", "120").replace("{h}", "120")
+                    .replace("{c}", "bb").replace("{f}", "jpg")
+                )
+            if kind == "song":
+                subtitle = attrs.get("albumName", "")
+            else:
+                count = attrs.get("trackCount")
+                year = (attrs.get("releaseDate", "") or "")[:4]
+                parts = [p for p in (f"{count} tracks" if count else "", year) if p]
+                subtitle = " · ".join(parts)
+            out.append(
+                SearchResult(
+                    id=str(item.get("id", "")),
+                    kind=kind,
+                    title=attrs.get("name", "Unknown"),
+                    artist=attrs.get("artistName", ""),
+                    url=attrs.get("url", ""),
+                    artwork_url=artwork_url,
+                    subtitle=subtitle,
+                )
+            )
+    return out
+
+
+def search_sync(
+    term: str,
+    media_user_token: str,
+    *,
+    types: str = "songs,albums",
+    limit: int = 25,
+) -> list[SearchResult]:
+    """Search the Apple Music catalog for songs and albums (blocking)."""
+    async def _run() -> list[SearchResult]:
+        api = await _create_api(media_user_token)
+        try:
+            raw = await api.get_search_results(term=term, types=types, limit=limit)
+        finally:
+            await api.client.aclose()
+        return _normalize_search(raw)
+
+    return asyncio.run(_run())
+
+
 async def _build_downloader(
     media_user_token: str,
     output_path: Path,
     temp_path: Path,
 ) -> AppleMusicDownloader:
-    api = await AppleMusicApi.create(media_user_token=media_user_token)
+    api = await _create_api(media_user_token)
     if not api.active_subscription:
         raise RuntimeError("No active Apple Music subscription on this account.")
 
