@@ -7,7 +7,7 @@ name = "apple-music-dl"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-    "gamdl>=3.5",
+    "gamdl>=3.7.4",
     "pywebview>=5.0",
     "keyring>=25.0",
     "mutagen>=1.47",
